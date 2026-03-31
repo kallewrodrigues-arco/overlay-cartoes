@@ -20,13 +20,6 @@ import fitz  # PyMuPDF
 # CONFIGURAÇÃO
 # ─────────────────────────────────────────────
 
-AREA_RESPOSTA_PADRAO = {
-    "left_pct":   0.03,
-    "top_pct":    0.30,
-    "right_pct":  0.97,
-    "bottom_pct": 0.97,
-}
-
 DPI = 200
 
 # ─────────────────────────────────────────────
@@ -84,7 +77,6 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
 
 
 def primeira_imagem(arquivos) -> Image.Image | None:
-    """Extrai a primeira imagem ou primeira página do primeiro arquivo enviado."""
     if not arquivos:
         return None
     arq = sorted(arquivos, key=lambda f: f.name)[0]
@@ -104,10 +96,8 @@ def redimensionar_preview(img: Image.Image, max_h: int = 500) -> Image.Image:
 
 
 def gerar_preview_crop(img: Image.Image, cortar_topo: float, cortar_base: float) -> Image.Image:
-    """Desenha linhas e áreas de corte sobre o preview da resposta."""
     preview = redimensionar_preview(img)
     w, h = preview.size
-    draw = ImageDraw.Draw(preview)
     espessura = 3
 
     if cortar_topo > 0:
@@ -134,7 +124,6 @@ def gerar_preview_crop(img: Image.Image, cortar_topo: float, cortar_base: float)
 
 
 def gerar_preview_cartao(img: Image.Image, top_pct: float, bottom_pct: float, left_pct: float, right_pct: float) -> Image.Image:
-    """Desenha a marcação das margens preservadas sobre o preview do cartão."""
     preview = redimensionar_preview(img)
     w, h = preview.size
 
@@ -144,19 +133,17 @@ def gerar_preview_cartao(img: Image.Image, top_pct: float, bottom_pct: float, le
     y1 = int(h * (1 - bottom_pct))
 
     preview = preview.convert("RGBA")
-    cor_margem  = (0, 100, 255, 50)
+    cor_margem   = (0, 100, 255, 50)
     cor_resposta = (0, 200, 100, 30)
 
-    # Área de resposta (verde)
     overlay_resp = Image.new("RGBA", (x1 - x0, y1 - y0), cor_resposta)
     preview.paste(overlay_resp, (x0, y0), overlay_resp)
 
-    # Margens preservadas (azul): topo, base, esquerda, direita
     for rect in [
-        (0, 0, w, y0),           # topo
-        (0, y1, w, h),           # base
-        (0, y0, x0, y1),         # esquerda
-        (x1, y0, w, y1),         # direita
+        (0, 0, w, y0),
+        (0, y1, w, h),
+        (0, y0, x0, y1),
+        (x1, y0, w, y1),
     ]:
         rx0, ry0, rx1, ry1 = rect
         rw, rh = rx1 - rx0, ry1 - ry0
@@ -166,12 +153,8 @@ def gerar_preview_cartao(img: Image.Image, top_pct: float, bottom_pct: float, le
 
     preview = preview.convert("RGB")
     draw = ImageDraw.Draw(preview)
-    espessura = 2
+    draw.rectangle([(x0, y0), (x1, y1)], outline=(0, 150, 80), width=2)
 
-    # Retângulo da área de resposta
-    draw.rectangle([(x0, y0), (x1, y1)], outline=(0, 150, 80), width=espessura)
-
-    # Labels
     if y0 > 14:
         draw.text((x0 + 4, y0 - 16), f"topo ({int(top_pct*100)}%)", fill=(0, 100, 255))
     if y1 < h - 4:
@@ -195,70 +178,21 @@ st.caption("Sobreponha respostas nos cartões preservando o cabeçalho.")
 
 st.divider()
 
-# ── 1. Arquivos ──────────────────────────────
-st.subheader("1. Arquivos")
+# ── 1. Cartões em branco ─────────────────────
+st.subheader("1. Cartões em branco")
+st.caption("Envie o PDF dos cartões em branco que receberão as respostas.")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    pdf_cartoes = st.file_uploader(
-        "PDF dos cartões resposta",
-        type=["pdf"],
-        help="O PDF baixado do sistema com os cartões."
-    )
-
-with col2:
-    arquivos_respostas = st.file_uploader(
-        "Respostas (imagens ou PDF)",
-        type=["png", "jpg", "jpeg", "pdf"],
-        accept_multiple_files=True,
-        help="Imagens avulsas (PNG/JPG) ou um PDF com todas as respostas."
-    )
+pdf_cartoes = st.file_uploader(
+    "PDF dos cartões em branco",
+    type=["pdf"],
+    help="O PDF baixado do sistema com os cartões."
+)
 
 st.divider()
 
-# ── 2. Recorte das respostas ─────────────────
-st.subheader("2. Recorte das respostas (opcional)")
-st.caption("Ative o recorte para remover texto de apoio no topo ou margens excessivas na base.")
-
-aplicar_crop_flag = st.toggle("Ativar recorte", value=False)
-
-cortar_topo = 0.0
-cortar_base = 0.0
-
-if aplicar_crop_flag:
-    col_sliders, col_preview = st.columns([1, 1], gap="large")
-
-    with col_sliders:
-        st.markdown("**Ajuste os cortes**")
-        cortar_topo = st.slider(
-            "Remover do topo (%)",
-            min_value=0, max_value=50, value=0, step=1,
-            help="Percentual removido do topo de cada resposta."
-        ) / 100
-        cortar_base = st.slider(
-            "Remover da base (%)",
-            min_value=0, max_value=50, value=0, step=1,
-            help="Percentual removido da base de cada resposta."
-        ) / 100
-
-        if cortar_topo == 0 and cortar_base == 0:
-            st.info("Mova os sliders para visualizar o corte.")
-
-    with col_preview:
-        st.markdown("**Preview**")
-        if arquivos_respostas:
-            img_preview = primeira_imagem(arquivos_respostas)
-            if img_preview:
-                st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base), use_container_width=True)
-        else:
-            st.caption("⬆️ Faça o upload das respostas para ver o preview aqui.")
-
-st.divider()
-
-# ── 3. Área de resposta no cartão ────────────
-st.subheader("3. Área de resposta no cartão")
-st.caption("Marque onde o cabeçalho termina para definir onde a resposta será colada.")
+# ── 2. Área da resposta ──────────────────────
+st.subheader("2. Área da resposta")
+st.caption("Marque as margens que devem ser preservadas. A área verde é onde as respostas serão coladas.")
 
 col_slider_cartao, col_preview_cartao = st.columns([1, 1], gap="large")
 
@@ -295,7 +229,7 @@ with col_preview_cartao:
         if paginas_cartao:
             st.image(gerar_preview_cartao(paginas_cartao[0], top_pct, bottom_pct, left_pct, right_pct), use_container_width=True)
     else:
-        st.caption("⬆️ Faça o upload do PDF dos cartões para ver o preview aqui.")
+        st.caption("⬆️ Envie o PDF dos cartões na seção 1 para ver o preview aqui.")
 
 area = {
     "left_pct":   left_pct,
@@ -306,17 +240,68 @@ area = {
 
 st.divider()
 
-# ── 4. Gerar cartões ─────────────────────────
-st.subheader("4. Gerar cartões")
+# ── 3. Respostas ─────────────────────────────
+st.subheader("3. Respostas")
+st.caption("Envie aqui os arquivos com as respostas que serão coladas nos cartões em branco.")
+
+arquivos_respostas = st.file_uploader(
+    "Respostas (imagens ou PDF)",
+    type=["png", "jpg", "jpeg", "pdf"],
+    accept_multiple_files=True,
+    help="Imagens avulsas (PNG/JPG) ou um PDF com todas as respostas."
+)
+
+st.divider()
+
+# ── 4. Recorte das respostas ─────────────────
+st.subheader("4. Recorte das respostas (opcional)")
+st.caption("Ative o recorte para remover texto de apoio no topo ou margens excessivas na base.")
+
+aplicar_crop_flag = st.toggle("Ativar recorte", value=False)
+
+cortar_topo = 0.0
+cortar_base = 0.0
+
+if aplicar_crop_flag:
+    col_sliders, col_preview = st.columns([1, 1], gap="large")
+
+    with col_sliders:
+        st.markdown("**Ajuste os cortes**")
+        cortar_topo = st.slider(
+            "Remover do topo (%)",
+            min_value=0, max_value=50, value=0, step=1,
+            help="Percentual removido do topo de cada resposta."
+        ) / 100
+        cortar_base = st.slider(
+            "Remover da base (%)",
+            min_value=0, max_value=50, value=0, step=1,
+            help="Percentual removido da base de cada resposta."
+        ) / 100
+        if cortar_topo == 0 and cortar_base == 0:
+            st.info("Mova os sliders para visualizar o corte.")
+
+    with col_preview:
+        st.markdown("**Preview**")
+        if arquivos_respostas:
+            img_preview = primeira_imagem(arquivos_respostas)
+            if img_preview:
+                st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base), use_container_width=True)
+        else:
+            st.caption("⬆️ Envie as respostas na seção 3 para ver o preview aqui.")
+
+st.divider()
+
+# ── 5. Gerar cartões ─────────────────────────
+st.subheader("5. Gerar cartões")
 
 if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
 
     if not pdf_cartoes:
-        st.error("⚠️ Faça o upload do PDF dos cartões resposta.")
+        st.error("⚠️ Envie o PDF dos cartões em branco na seção 1.")
         st.stop()
 
     if not arquivos_respostas:
-        st.error("⚠️ Faça o upload de pelo menos uma resposta.")
+        st.error("⚠️ Envie as respostas na seção 3.")
         st.stop()
 
     with st.spinner("Processando..."):
