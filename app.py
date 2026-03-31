@@ -133,29 +133,53 @@ def gerar_preview_crop(img: Image.Image, cortar_topo: float, cortar_base: float)
     return preview
 
 
-def gerar_preview_cartao(img: Image.Image, top_pct: float) -> Image.Image:
-    """Desenha a marcação do cabeçalho sobre o preview do cartão."""
+def gerar_preview_cartao(img: Image.Image, top_pct: float, bottom_pct: float, left_pct: float, right_pct: float) -> Image.Image:
+    """Desenha a marcação das margens preservadas sobre o preview do cartão."""
     preview = redimensionar_preview(img)
     w, h = preview.size
 
-    y_cabecalho = int(h * top_pct)
+    x0 = int(w * left_pct)
+    y0 = int(h * top_pct)
+    x1 = int(w * (1 - right_pct))
+    y1 = int(h * (1 - bottom_pct))
 
-    # Área do cabeçalho — overlay azul
-    overlay = Image.new("RGBA", (w, y_cabecalho), (0, 100, 255, 50))
     preview = preview.convert("RGBA")
-    preview.paste(overlay, (0, 0), overlay)
+    cor_margem  = (0, 100, 255, 50)
+    cor_resposta = (0, 200, 100, 30)
 
-    # Área de resposta — overlay verde
-    overlay_resp = Image.new("RGBA", (w, h - y_cabecalho), (0, 200, 100, 30))
-    preview.paste(overlay_resp, (0, y_cabecalho), overlay_resp)
+    # Área de resposta (verde)
+    overlay_resp = Image.new("RGBA", (x1 - x0, y1 - y0), cor_resposta)
+    preview.paste(overlay_resp, (x0, y0), overlay_resp)
+
+    # Margens preservadas (azul): topo, base, esquerda, direita
+    for rect in [
+        (0, 0, w, y0),           # topo
+        (0, y1, w, h),           # base
+        (0, y0, x0, y1),         # esquerda
+        (x1, y0, w, y1),         # direita
+    ]:
+        rx0, ry0, rx1, ry1 = rect
+        rw, rh = rx1 - rx0, ry1 - ry0
+        if rw > 0 and rh > 0:
+            ov = Image.new("RGBA", (rw, rh), cor_margem)
+            preview.paste(ov, (rx0, ry0), ov)
 
     preview = preview.convert("RGB")
     draw = ImageDraw.Draw(preview)
+    espessura = 2
 
-    # Linha divisória
-    draw.line([(0, y_cabecalho), (w, y_cabecalho)], fill=(0, 100, 255), width=3)
-    draw.text((8, y_cabecalho - 20), f"▲ cabeçalho ({int(top_pct*100)}%)", fill=(0, 100, 255))
-    draw.text((8, y_cabecalho + 6), "▼ área de resposta", fill=(0, 150, 80))
+    # Retângulo da área de resposta
+    draw.rectangle([(x0, y0), (x1, y1)], outline=(0, 150, 80), width=espessura)
+
+    # Labels
+    if y0 > 14:
+        draw.text((x0 + 4, y0 - 16), f"topo ({int(top_pct*100)}%)", fill=(0, 100, 255))
+    if y1 < h - 4:
+        draw.text((x0 + 4, y1 + 4), f"base ({int(bottom_pct*100)}%)", fill=(0, 100, 255))
+    if x0 > 4:
+        draw.text((4, y0 + 4), f"esq\n({int(left_pct*100)}%)", fill=(0, 100, 255))
+    if x1 < w - 4:
+        draw.text((x1 + 4, y0 + 4), f"dir\n({int(right_pct*100)}%)", fill=(0, 100, 255))
 
     return preview
 
@@ -239,13 +263,28 @@ st.caption("Marque onde o cabeçalho termina para definir onde a resposta será 
 col_slider_cartao, col_preview_cartao = st.columns([1, 1], gap="large")
 
 with col_slider_cartao:
-    st.markdown("**Ajuste o cabeçalho**")
+    st.markdown("**Ajuste as margens**")
     top_pct = st.slider(
-        "Onde o cabeçalho termina (% do topo)",
+        "Topo — cabeçalho (%)",
         min_value=0, max_value=80, value=30, step=1,
-        help="Aumente se a resposta cobrir o cabeçalho. Diminua se ficar uma faixa em branco."
+        help="Percentual do topo preservado (cabeçalho)."
     ) / 100
-    st.markdown("🔵 Azul = cabeçalho preservado")
+    bottom_pct = st.slider(
+        "Base (%)",
+        min_value=0, max_value=50, value=3, step=1,
+        help="Percentual da base preservado."
+    ) / 100
+    left_pct = st.slider(
+        "Lateral esquerda (%)",
+        min_value=0, max_value=30, value=3, step=1,
+        help="Percentual da lateral esquerda preservado."
+    ) / 100
+    right_pct = st.slider(
+        "Lateral direita (%)",
+        min_value=0, max_value=30, value=3, step=1,
+        help="Percentual da lateral direita preservado."
+    ) / 100
+    st.markdown("🔵 Azul = margens preservadas")
     st.markdown("🟢 Verde = área onde a resposta será colada")
 
 with col_preview_cartao:
@@ -254,11 +293,16 @@ with col_preview_cartao:
         pdf_cartoes.seek(0)
         paginas_cartao = pdf_para_imagens(pdf_cartoes.read(), DPI)
         if paginas_cartao:
-            st.image(gerar_preview_cartao(paginas_cartao[0], top_pct), use_container_width=True)
+            st.image(gerar_preview_cartao(paginas_cartao[0], top_pct, bottom_pct, left_pct, right_pct), use_container_width=True)
     else:
         st.caption("⬆️ Faça o upload do PDF dos cartões para ver o preview aqui.")
 
-area = {**AREA_RESPOSTA_PADRAO, "top_pct": top_pct}
+area = {
+    "left_pct":   left_pct,
+    "top_pct":    top_pct,
+    "right_pct":  1 - right_pct,
+    "bottom_pct": 1 - bottom_pct,
+}
 
 st.divider()
 
