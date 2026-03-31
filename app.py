@@ -1,7 +1,7 @@
 """
 app.py
 ------
-Aplicação web para sobreposição de redações em cartões resposta.
+Aplicação web para sobreposição de respostas em cartões resposta.
 Desenvolvida com Streamlit.
 
 Dependências:
@@ -55,7 +55,7 @@ def aplicar_crop(img: Image.Image, cortar_topo: float, cortar_base: float) -> Im
     return img.crop((0, y_inicio, largura, y_fim))
 
 
-def sobrepor_redacao(cartao: Image.Image, redacao: Image.Image, area: dict) -> Image.Image:
+def sobrepor_resposta(cartao: Image.Image, resposta: Image.Image, area: dict) -> Image.Image:
     resultado = cartao.copy()
     largura, altura = cartao.size
 
@@ -66,16 +66,16 @@ def sobrepor_redacao(cartao: Image.Image, redacao: Image.Image, area: dict) -> I
     area_w = x1 - x0
     area_h = y1 - y0
 
-    ratio  = max(area_w / redacao.width, area_h / redacao.height)
-    novo_w = int(redacao.width  * ratio)
-    novo_h = int(redacao.height * ratio)
-    redacao = redacao.resize((novo_w, novo_h), Image.LANCZOS)
+    ratio  = max(area_w / resposta.width, area_h / resposta.height)
+    novo_w = int(resposta.width  * ratio)
+    novo_h = int(resposta.height * ratio)
+    resposta = resposta.resize((novo_w, novo_h), Image.LANCZOS)
 
     crop_x = (novo_w - area_w) // 2
     crop_y = (novo_h - area_h) // 2
-    redacao = redacao.crop((crop_x, crop_y, crop_x + area_w, crop_y + area_h))
+    resposta = resposta.crop((crop_x, crop_y, crop_x + area_w, crop_y + area_h))
 
-    resultado.paste(redacao, (x0, y0))
+    resultado.paste(resposta, (x0, y0))
     return resultado
 
 
@@ -92,7 +92,7 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
 st.set_page_config(page_title="Overlay Cartões Resposta", page_icon="🗂️", layout="centered")
 
 st.title("🗂️ Overlay de Cartões Resposta")
-st.caption("Sobreponha redações nos cartões resposta preservando o cabeçalho.")
+st.caption("Sobreponha respostas nos cartões resposta preservando o cabeçalho.")
 
 st.divider()
 
@@ -110,16 +110,16 @@ with col1:
 
 with col2:
     arquivos_respostas = st.file_uploader(
-        "Redações (imagens ou PDF)",
+        "respostas (imagens ou PDF)",
         type=["png", "jpg", "jpeg", "pdf"],
         accept_multiple_files=True,
-        help="Imagens avulsas (PNG/JPG) ou um PDF com todas as redações."
+        help="Imagens avulsas (PNG/JPG) ou um PDF com todas as respostas."
     )
 
 st.divider()
 
 # --- Crop ---
-st.subheader("2. Recorte das redações (opcional)")
+st.subheader("2. Recorte das respostas (opcional)")
 st.caption("Use os controles abaixo para remover texto de apoio no topo ou margens excessivas na base.")
 
 aplicar_crop_flag = st.toggle("Ativar recorte", value=False)
@@ -133,31 +133,31 @@ if aplicar_crop_flag:
         cortar_topo = st.slider(
             "Remover do topo (%)",
             min_value=0, max_value=50, value=0, step=1,
-            help="Percentual removido do topo de cada redação."
+            help="Percentual removido do topo de cada resposta."
         ) / 100
     with col4:
         cortar_base = st.slider(
             "Remover da base (%)",
             min_value=0, max_value=50, value=0, step=1,
-            help="Percentual removido da base de cada redação."
+            help="Percentual removido da base de cada resposta."
         ) / 100
 
 st.divider()
 
 # --- Área de resposta ---
 st.subheader("3. Área de resposta no cartão")
-st.caption("Define onde a redação será colada. Ajuste apenas se a sobreposição não ficar alinhada.")
+st.caption("Define onde a resposta será colada. Ajuste apenas se a sobreposição não ficar alinhada.")
+
+top_pct = AREA_RESPOSTA_PADRAO["top_pct"]
 
 with st.expander("⚙️ Ajustes avançados"):
     top_pct = st.slider(
         "Onde o cabeçalho termina (% do topo)",
         min_value=0, max_value=80, value=30, step=1,
-        help="Aumente se a redação cobrir o cabeçalho. Diminua se ficar uma faixa em branco."
+        help="Aumente se a resposta cobrir o cabeçalho. Diminua se ficar uma faixa em branco."
     ) / 100
 
-    area = {**AREA_RESPOSTA_PADRAO, "top_pct": top_pct}
-else:
-    area = AREA_RESPOSTA_PADRAO
+area = {**AREA_RESPOSTA_PADRAO, "top_pct": top_pct}
 
 st.divider()
 
@@ -171,7 +171,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
         st.stop()
 
     if not arquivos_respostas:
-        st.error("⚠️ Faça o upload de pelo menos uma redação.")
+        st.error("⚠️ Faça o upload de pelo menos uma resposta.")
         st.stop()
 
     with st.spinner("Processando..."):
@@ -179,7 +179,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
         # Extrai cartões do PDF
         cartoes = pdf_para_imagens(pdf_cartoes.read(), DPI)
 
-        # Extrai redações (imagens e/ou PDF)
+        # Extrai respostas (imagens e/ou PDF)
         respostas = []
         for arq in sorted(arquivos_respostas, key=lambda f: f.name):
             if arq.type == "application/pdf":
@@ -195,7 +195,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
 
         if len(respostas) < len(cartoes):
             st.warning(
-                f"⚠️ Há menos redações ({len(respostas)}) do que cartões ({len(cartoes)}). "
+                f"⚠️ Há menos respostas ({len(respostas)}) do que cartões ({len(cartoes)}). "
                 "Os cartões sem par serão exportados sem sobreposição."
             )
 
@@ -204,7 +204,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for i, cartao in enumerate(cartoes):
                 if i < len(respostas):
-                    cartao_final = sobrepor_redacao(cartao, respostas[i], area)
+                    cartao_final = sobrepor_resposta(cartao, respostas[i], area)
                 else:
                     cartao_final = cartao
                 zf.writestr(f"cartao_{i+1:03d}.png", imagem_para_bytes(cartao_final))
