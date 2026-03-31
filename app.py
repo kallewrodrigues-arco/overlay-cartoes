@@ -37,13 +37,15 @@ def pdf_para_imagens(pdf_bytes: bytes, dpi: int) -> list[Image.Image]:
     return imagens
 
 
-def aplicar_crop(img: Image.Image, cortar_topo: float, cortar_base: float) -> Image.Image:
+def aplicar_crop(img: Image.Image, cortar_topo: float, cortar_base: float, cortar_esq: float, cortar_dir: float) -> Image.Image:
     largura, altura = img.size
-    y_inicio = int(altura * cortar_topo)
-    y_fim    = int(altura * (1 - cortar_base))
-    if y_inicio >= y_fim:
+    x0 = int(largura * cortar_esq)
+    x1 = int(largura * (1 - cortar_dir))
+    y0 = int(altura  * cortar_topo)
+    y1 = int(altura  * (1 - cortar_base))
+    if x0 >= x1 or y0 >= y1:
         return img
-    return img.crop((0, y_inicio, largura, y_fim))
+    return img.crop((x0, y0, x1, y1))
 
 
 def sobrepor_resposta(cartao: Image.Image, resposta: Image.Image, area: dict) -> Image.Image:
@@ -95,30 +97,42 @@ def redimensionar_preview(img: Image.Image, max_h: int = 500) -> Image.Image:
     return img.copy()
 
 
-def gerar_preview_crop(img: Image.Image, cortar_topo: float, cortar_base: float) -> Image.Image:
+def gerar_preview_crop(img: Image.Image, cortar_topo: float, cortar_base: float, cortar_esq: float, cortar_dir: float) -> Image.Image:
     preview = redimensionar_preview(img)
     w, h = preview.size
     espessura = 3
 
-    if cortar_topo > 0:
-        y_topo = int(h * cortar_topo)
-        overlay = Image.new("RGBA", (w, y_topo), (255, 0, 0, 60))
-        preview = preview.convert("RGBA")
-        preview.paste(overlay, (0, 0), overlay)
-        preview = preview.convert("RGB")
-        draw = ImageDraw.Draw(preview)
-        draw.line([(0, y_topo), (w, y_topo)], fill="red", width=espessura)
-        draw.text((8, y_topo - 18), f"▲ cortar topo ({int(cortar_topo*100)}%)", fill="red")
+    x0 = int(w * cortar_esq)
+    x1 = int(w * (1 - cortar_dir))
+    y0 = int(h * cortar_topo)
+    y1 = int(h * (1 - cortar_base))
 
-    if cortar_base > 0:
-        y_base = int(h * (1 - cortar_base))
-        overlay = Image.new("RGBA", (w, h - y_base), (255, 0, 0, 60))
+    # Áreas descartadas — overlay vermelho
+    regioes = []
+    if cortar_topo > 0:  regioes.append((0, 0, w, y0))
+    if cortar_base > 0:  regioes.append((0, y1, w, h))
+    if cortar_esq  > 0:  regioes.append((0, y0, x0, y1))
+    if cortar_dir  > 0:  regioes.append((x1, y0, w, y1))
+
+    if regioes:
         preview = preview.convert("RGBA")
-        preview.paste(overlay, (0, y_base), overlay)
+        for rx0, ry0, rx1, ry1 in regioes:
+            rw, rh = rx1 - rx0, ry1 - ry0
+            if rw > 0 and rh > 0:
+                ov = Image.new("RGBA", (rw, rh), (255, 0, 0, 60))
+                preview.paste(ov, (rx0, ry0), ov)
         preview = preview.convert("RGB")
-        draw = ImageDraw.Draw(preview)
-        draw.line([(0, y_base), (w, y_base)], fill="red", width=espessura)
-        draw.text((8, y_base + 6), f"▼ cortar base ({int(cortar_base*100)}%)", fill="red")
+
+    draw = ImageDraw.Draw(preview)
+
+    # Retângulo da área mantida
+    draw.rectangle([(x0, y0), (x1, y1)], outline="green", width=espessura)
+
+    # Labels
+    if cortar_topo > 0: draw.text((x0 + 4, y0 - 18), f"▲ topo ({int(cortar_topo*100)}%)", fill="red")
+    if cortar_base > 0: draw.text((x0 + 4, y1 + 4),  f"▼ base ({int(cortar_base*100)}%)", fill="red")
+    if cortar_esq  > 0: draw.text((4, y0 + 4),        f"esq\n({int(cortar_esq*100)}%)",    fill="red")
+    if cortar_dir  > 0: draw.text((x1 + 4, y0 + 4),   f"dir\n({int(cortar_dir*100)}%)",    fill="red")
 
     return preview
 
@@ -261,6 +275,8 @@ aplicar_crop_flag = st.toggle("Ativar recorte", value=False)
 
 cortar_topo = 0.0
 cortar_base = 0.0
+cortar_esq  = 0.0
+cortar_dir  = 0.0
 
 if aplicar_crop_flag:
     col_sliders, col_preview = st.columns([1, 1], gap="large")
@@ -277,7 +293,17 @@ if aplicar_crop_flag:
             min_value=0, max_value=50, value=0, step=1,
             help="Percentual removido da base de cada resposta."
         ) / 100
-        if cortar_topo == 0 and cortar_base == 0:
+        cortar_esq = st.slider(
+            "Remover da lateral esquerda (%)",
+            min_value=0, max_value=30, value=0, step=1,
+            help="Percentual removido da lateral esquerda de cada resposta."
+        ) / 100
+        cortar_dir = st.slider(
+            "Remover da lateral direita (%)",
+            min_value=0, max_value=30, value=0, step=1,
+            help="Percentual removido da lateral direita de cada resposta."
+        ) / 100
+        if cortar_topo == 0 and cortar_base == 0 and cortar_esq == 0 and cortar_dir == 0:
             st.info("Mova os sliders para visualizar o corte.")
 
     with col_preview:
@@ -285,7 +311,7 @@ if aplicar_crop_flag:
         if arquivos_respostas:
             img_preview = primeira_imagem(arquivos_respostas)
             if img_preview:
-                st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base), use_container_width=True)
+                st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base, cortar_esq, cortar_dir), use_container_width=True)
         else:
             st.caption("⬆️ Envie as respostas na seção 3 para ver o preview aqui.")
 
@@ -320,7 +346,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
                 respostas.append(img)
 
         if aplicar_crop_flag:
-            respostas = [aplicar_crop(r, cortar_topo, cortar_base) for r in respostas]
+            respostas = [aplicar_crop(r, cortar_topo, cortar_base, cortar_esq, cortar_dir) for r in respostas]
 
         if len(respostas) < len(cartoes):
             st.warning(
