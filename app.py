@@ -10,7 +10,6 @@ Dependências:
 
 import io
 import zipfile
-import tempfile
 from pathlib import Path
 
 import streamlit as st
@@ -92,7 +91,7 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
 st.set_page_config(page_title="Overlay Cartões Resposta", page_icon="🗂️", layout="centered")
 
 st.title("🗂️ Overlay de Cartões Resposta")
-st.caption("Sobreponha respostas nos cartões resposta preservando o cabeçalho.")
+st.caption("Sobreponha respostas nos cartões preservando o cabeçalho.")
 
 st.divider()
 
@@ -110,7 +109,7 @@ with col1:
 
 with col2:
     arquivos_respostas = st.file_uploader(
-        "respostas (imagens ou PDF)",
+        "Respostas (imagens ou PDF)",
         type=["png", "jpg", "jpeg", "pdf"],
         accept_multiple_files=True,
         help="Imagens avulsas (PNG/JPG) ou um PDF com todas as respostas."
