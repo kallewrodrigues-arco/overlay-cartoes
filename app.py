@@ -78,7 +78,19 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def primeira_imagem(arquivos) -> Image.Image | None:
+def extrair_cartoes(arquivos) -> list[Image.Image]:
+    """Extrai cartões de uma lista de arquivos (PDFs e/ou imagens), em ordem alfabética."""
+    cartoes = []
+    for arq in sorted(arquivos, key=lambda f: f.name):
+        arq.seek(0)
+        if arq.type == "application/pdf":
+            cartoes.extend(pdf_para_imagens(arq.read(), DPI))
+        else:
+            cartoes.append(Image.open(arq).convert("RGB"))
+    return cartoes
+
+
+
     if not arquivos:
         return None
     arq = sorted(arquivos, key=lambda f: f.name)[0]
@@ -196,10 +208,11 @@ st.divider()
 st.subheader("1. Cartões em branco")
 st.caption("Envie o PDF dos cartões em branco que receberão as respostas.")
 
-pdf_cartoes = st.file_uploader(
-    "PDF dos cartões em branco",
-    type=["pdf"],
-    help="O PDF baixado do sistema com os cartões."
+arquivos_cartoes = st.file_uploader(
+    "Cartões em branco (PDF, PNG ou JPG)",
+    type=["pdf", "png", "jpg", "jpeg"],
+    accept_multiple_files=True,
+    help="Aceita qualquer combinação: PDFs, PNGs e JPGs. A ordem de processamento segue a ordem alfabética dos arquivos."
 )
 
 st.divider()
@@ -237,13 +250,18 @@ with col_slider_cartao:
 
 with col_preview_cartao:
     st.markdown("**Preview**")
-    if pdf_cartoes:
-        pdf_cartoes.seek(0)
-        paginas_cartao = pdf_para_imagens(pdf_cartoes.read(), DPI)
-        if paginas_cartao:
-            st.image(gerar_preview_cartao(paginas_cartao[0], top_pct, bottom_pct, left_pct, right_pct), use_container_width=True)
+    if arquivos_cartoes:
+        arq = sorted(arquivos_cartoes, key=lambda f: f.name)[0]
+        arq.seek(0)
+        if arq.type == "application/pdf":
+            paginas_cartao = pdf_para_imagens(arq.read(), DPI)
+            img_cartao = paginas_cartao[0] if paginas_cartao else None
+        else:
+            img_cartao = Image.open(arq).convert("RGB")
+        if img_cartao:
+            st.image(gerar_preview_cartao(img_cartao, top_pct, bottom_pct, left_pct, right_pct), use_container_width=True)
     else:
-        st.caption("⬆️ Envie o PDF dos cartões na seção 1 para ver o preview aqui.")
+        st.caption("⬆️ Envie os cartões na seção 1 para ver o preview aqui.")
 
 area = {
     "left_pct":   left_pct,
@@ -322,8 +340,8 @@ st.subheader("5. Gerar cartões")
 
 if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
 
-    if not pdf_cartoes:
-        st.error("⚠️ Envie o PDF dos cartões em branco na seção 1.")
+    if not arquivos_cartoes:
+        st.error("⚠️ Envie os cartões em branco na seção 1.")
         st.stop()
 
     if not arquivos_respostas:
@@ -332,8 +350,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
 
     with st.spinner("Processando..."):
 
-        pdf_cartoes.seek(0)
-        cartoes = pdf_para_imagens(pdf_cartoes.read(), DPI)
+        cartoes = extrair_cartoes(arquivos_cartoes)
 
         respostas = []
         for arq in sorted(arquivos_respostas, key=lambda f: f.name):
