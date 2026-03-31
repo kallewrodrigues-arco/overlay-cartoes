@@ -10,10 +10,9 @@ Dependências:
 
 import io
 import zipfile
-from pathlib import Path
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw
 import fitz  # PyMuPDF
 
 
@@ -84,6 +83,58 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
+def primeira_imagem(arquivos) -> Image.Image | None:
+    """Extrai a primeira imagem ou primeira página do primeiro arquivo enviado."""
+    if not arquivos:
+        return None
+    arq = sorted(arquivos, key=lambda f: f.name)[0]
+    arq.seek(0)
+    if arq.type == "application/pdf":
+        paginas = pdf_para_imagens(arq.read(), DPI)
+        return paginas[0] if paginas else None
+    else:
+        return Image.open(arq).convert("RGB")
+
+
+def gerar_preview(img: Image.Image, cortar_topo: float, cortar_base: float) -> Image.Image:
+    """Desenha linhas de corte vermelhas sobre o preview da imagem."""
+    preview = img.copy()
+    # Reduz para caber bem na tela
+    max_h = 500
+    if preview.height > max_h:
+        ratio = max_h / preview.height
+        preview = preview.resize(
+            (int(preview.width * ratio), max_h), Image.LANCZOS
+        )
+
+    w, h = preview.size
+    draw = ImageDraw.Draw(preview)
+    espessura = 3
+
+    if cortar_topo > 0:
+        y_topo = int(h * cortar_topo)
+        # Área descartada no topo — overlay semitransparente
+        overlay = Image.new("RGBA", (w, y_topo), (255, 0, 0, 60))
+        preview = preview.convert("RGBA")
+        preview.paste(overlay, (0, 0), overlay)
+        preview = preview.convert("RGB")
+        draw = ImageDraw.Draw(preview)
+        draw.line([(0, y_topo), (w, y_topo)], fill="red", width=espessura)
+        draw.text((8, y_topo - 18), f"▲ cortar topo ({int(cortar_topo*100)}%)", fill="red")
+
+    if cortar_base > 0:
+        y_base = int(h * (1 - cortar_base))
+        overlay = Image.new("RGBA", (w, h - y_base), (255, 0, 0, 60))
+        preview = preview.convert("RGBA")
+        preview.paste(overlay, (0, y_base), overlay)
+        preview = preview.convert("RGB")
+        draw = ImageDraw.Draw(preview)
+        draw.line([(0, y_base), (w, y_base)], fill="red", width=espessura)
+        draw.text((8, y_base + 6), f"▼ cortar base ({int(cortar_base*100)}%)", fill="red")
+
+    return preview
+
+
 # ─────────────────────────────────────────────
 # INTERFACE
 # ─────────────────────────────────────────────
@@ -119,7 +170,7 @@ st.divider()
 
 # --- Crop ---
 st.subheader("2. Recorte das respostas (opcional)")
-st.caption("Use os controles abaixo para remover texto de apoio no topo ou margens excessivas na base.")
+st.caption("Ative o recorte para remover texto de apoio no topo ou margens excessivas na base.")
 
 aplicar_crop_flag = st.toggle("Ativar recorte", value=False)
 
@@ -127,19 +178,33 @@ cortar_topo = 0.0
 cortar_base = 0.0
 
 if aplicar_crop_flag:
-    col3, col4 = st.columns(2)
-    with col3:
+    col_sliders, col_preview = st.columns([1, 1], gap="large")
+
+    with col_sliders:
+        st.markdown("**Ajuste os cortes**")
         cortar_topo = st.slider(
             "Remover do topo (%)",
             min_value=0, max_value=50, value=0, step=1,
             help="Percentual removido do topo de cada resposta."
         ) / 100
-    with col4:
         cortar_base = st.slider(
             "Remover da base (%)",
             min_value=0, max_value=50, value=0, step=1,
             help="Percentual removido da base de cada resposta."
         ) / 100
+
+        if cortar_topo == 0 and cortar_base == 0:
+            st.info("Mova os sliders para visualizar o corte.")
+
+    with col_preview:
+        st.markdown("**Preview**")
+        if arquivos_respostas:
+            img_preview = primeira_imagem(arquivos_respostas)
+            if img_preview:
+                preview = gerar_preview(img_preview, cortar_topo, cortar_base)
+                st.image(preview, use_container_width=True)
+        else:
+            st.caption("⬆️ Faça o upload das respostas para ver o preview aqui.")
 
 st.divider()
 
@@ -175,12 +240,11 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
 
     with st.spinner("Processando..."):
 
-        # Extrai cartões do PDF
         cartoes = pdf_para_imagens(pdf_cartoes.read(), DPI)
 
-        # Extrai respostas (imagens e/ou PDF)
         respostas = []
         for arq in sorted(arquivos_respostas, key=lambda f: f.name):
+            arq.seek(0)
             if arq.type == "application/pdf":
                 paginas = pdf_para_imagens(arq.read(), DPI)
                 respostas.extend(paginas)
@@ -188,7 +252,6 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
                 img = Image.open(arq).convert("RGB")
                 respostas.append(img)
 
-        # Aplica crop se ativado
         if aplicar_crop_flag:
             respostas = [aplicar_crop(r, cortar_topo, cortar_base) for r in respostas]
 
@@ -198,7 +261,6 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
                 "Os cartões sem par serão exportados sem sobreposição."
             )
 
-        # Gera cartões finais e empacota em ZIP
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for i, cartao in enumerate(cartoes):
