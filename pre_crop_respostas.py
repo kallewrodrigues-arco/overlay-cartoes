@@ -1,7 +1,7 @@
 """
-pre_crop_redacoes.py
---------------------
-Faz crop nas imagens das redações, removendo:
+pre_crop_respostas.py
+---------------------
+Faz crop nas imagens das respostas, removendo:
   - Texto de apoio no topo (crop de baixo para cima)
   - Margem excessiva na parte inferior (crop de cima para baixo)
 
@@ -10,10 +10,10 @@ Aceita como entrada:
   - PDFs com múltiplas páginas (cada página vira um PNG separado)
 
 Uso:
-    python3 pre_crop_redacoes.py
-    python3 pre_crop_redacoes.py --topo 0.20
-    python3 pre_crop_redacoes.py --topo 0.20 --base 0.10
-    python3 pre_crop_redacoes.py --topo 0.20 --base 0.10 --overlay
+    python3 pre_crop_respostas.py
+    python3 pre_crop_respostas.py --topo 0.20
+    python3 pre_crop_respostas.py --topo 0.20 --base 0.10
+    python3 pre_crop_respostas.py --topo 0.20 --base 0.10 --overlay
 
 Dependências:
     pip install pillow pymupdf
@@ -34,7 +34,7 @@ import fitz  # PyMuPDF
 PASTA_ENTRADA = "respostas/"       # Pasta com imagens e/ou PDFs
 PASTA_SAIDA   = "respostas_crop/"  # Pasta onde os arquivos cropados serão salvos
 
-DPI = 200  # Resolução usada ao converter páginas de PDF em imagem
+DPI = 200
 
 # ─────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ def processar_pdf(path: Path, saida: Path, cortar_topo: float, cortar_base: floa
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Crop de redações: aceita imagens e PDFs, remove topo e/ou base."
+        description="Crop de respostas: aceita imagens e PDFs, remove topo e/ou base."
     )
     parser.add_argument("--topo", type=float, default=0.0,
                         help="Percentual do topo a descartar, ex: 0.20 = 20%% (padrão: 0.0)")
@@ -122,8 +122,8 @@ def main():
         print(f"⚠️  Nenhuma imagem ou PDF encontrado em '{PASTA_ENTRADA}'.")
         return
 
-    pdfs   = [p for p in arquivos if p.suffix.lower() == ".pdf"]
-    imgs   = [p for p in arquivos if p.suffix.lower() in exts_imagem]
+    pdfs = [p for p in arquivos if p.suffix.lower() == ".pdf"]
+    imgs = [p for p in arquivos if p.suffix.lower() in exts_imagem]
 
     print(f"✂️  Encontrado(s): {len(pdfs)} PDF(s) e {len(imgs)} imagem(ns)")
     print(f"   Descartando {int(cortar_topo * 100)}% do topo e {int(cortar_base * 100)}% da base\n")
