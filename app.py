@@ -96,24 +96,22 @@ def primeira_imagem(arquivos) -> Image.Image | None:
         return Image.open(arq).convert("RGB")
 
 
-def gerar_preview(img: Image.Image, cortar_topo: float, cortar_base: float) -> Image.Image:
-    """Desenha linhas de corte vermelhas sobre o preview da imagem."""
-    preview = img.copy()
-    # Reduz para caber bem na tela
-    max_h = 500
-    if preview.height > max_h:
-        ratio = max_h / preview.height
-        preview = preview.resize(
-            (int(preview.width * ratio), max_h), Image.LANCZOS
-        )
+def redimensionar_preview(img: Image.Image, max_h: int = 500) -> Image.Image:
+    if img.height > max_h:
+        ratio = max_h / img.height
+        return img.resize((int(img.width * ratio), max_h), Image.LANCZOS)
+    return img.copy()
 
+
+def gerar_preview_crop(img: Image.Image, cortar_topo: float, cortar_base: float) -> Image.Image:
+    """Desenha linhas e áreas de corte sobre o preview da resposta."""
+    preview = redimensionar_preview(img)
     w, h = preview.size
     draw = ImageDraw.Draw(preview)
     espessura = 3
 
     if cortar_topo > 0:
         y_topo = int(h * cortar_topo)
-        # Área descartada no topo — overlay semitransparente
         overlay = Image.new("RGBA", (w, y_topo), (255, 0, 0, 60))
         preview = preview.convert("RGBA")
         preview.paste(overlay, (0, 0), overlay)
@@ -135,6 +133,33 @@ def gerar_preview(img: Image.Image, cortar_topo: float, cortar_base: float) -> I
     return preview
 
 
+def gerar_preview_cartao(img: Image.Image, top_pct: float) -> Image.Image:
+    """Desenha a marcação do cabeçalho sobre o preview do cartão."""
+    preview = redimensionar_preview(img)
+    w, h = preview.size
+
+    y_cabecalho = int(h * top_pct)
+
+    # Área do cabeçalho — overlay azul
+    overlay = Image.new("RGBA", (w, y_cabecalho), (0, 100, 255, 50))
+    preview = preview.convert("RGBA")
+    preview.paste(overlay, (0, 0), overlay)
+
+    # Área de resposta — overlay verde
+    overlay_resp = Image.new("RGBA", (w, h - y_cabecalho), (0, 200, 100, 30))
+    preview.paste(overlay_resp, (0, y_cabecalho), overlay_resp)
+
+    preview = preview.convert("RGB")
+    draw = ImageDraw.Draw(preview)
+
+    # Linha divisória
+    draw.line([(0, y_cabecalho), (w, y_cabecalho)], fill=(0, 100, 255), width=3)
+    draw.text((8, y_cabecalho - 20), f"▲ cabeçalho ({int(top_pct*100)}%)", fill=(0, 100, 255))
+    draw.text((8, y_cabecalho + 6), "▼ área de resposta", fill=(0, 150, 80))
+
+    return preview
+
+
 # ─────────────────────────────────────────────
 # INTERFACE
 # ─────────────────────────────────────────────
@@ -146,7 +171,7 @@ st.caption("Sobreponha respostas nos cartões preservando o cabeçalho.")
 
 st.divider()
 
-# --- Upload ---
+# ── 1. Arquivos ──────────────────────────────
 st.subheader("1. Arquivos")
 
 col1, col2 = st.columns(2)
@@ -168,7 +193,7 @@ with col2:
 
 st.divider()
 
-# --- Crop ---
+# ── 2. Recorte das respostas ─────────────────
 st.subheader("2. Recorte das respostas (opcional)")
 st.caption("Ative o recorte para remover texto de apoio no topo ou margens excessivas na base.")
 
@@ -201,31 +226,43 @@ if aplicar_crop_flag:
         if arquivos_respostas:
             img_preview = primeira_imagem(arquivos_respostas)
             if img_preview:
-                preview = gerar_preview(img_preview, cortar_topo, cortar_base)
-                st.image(preview, use_container_width=True)
+                st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base), use_container_width=True)
         else:
             st.caption("⬆️ Faça o upload das respostas para ver o preview aqui.")
 
 st.divider()
 
-# --- Área de resposta ---
+# ── 3. Área de resposta no cartão ────────────
 st.subheader("3. Área de resposta no cartão")
-st.caption("Define onde a resposta será colada. Ajuste apenas se a sobreposição não ficar alinhada.")
+st.caption("Marque onde o cabeçalho termina para definir onde a resposta será colada.")
 
-top_pct = AREA_RESPOSTA_PADRAO["top_pct"]
+col_slider_cartao, col_preview_cartao = st.columns([1, 1], gap="large")
 
-with st.expander("⚙️ Ajustes avançados"):
+with col_slider_cartao:
+    st.markdown("**Ajuste o cabeçalho**")
     top_pct = st.slider(
         "Onde o cabeçalho termina (% do topo)",
         min_value=0, max_value=80, value=30, step=1,
         help="Aumente se a resposta cobrir o cabeçalho. Diminua se ficar uma faixa em branco."
     ) / 100
+    st.markdown("🔵 Azul = cabeçalho preservado")
+    st.markdown("🟢 Verde = área onde a resposta será colada")
+
+with col_preview_cartao:
+    st.markdown("**Preview**")
+    if pdf_cartoes:
+        pdf_cartoes.seek(0)
+        paginas_cartao = pdf_para_imagens(pdf_cartoes.read(), DPI)
+        if paginas_cartao:
+            st.image(gerar_preview_cartao(paginas_cartao[0], top_pct), use_container_width=True)
+    else:
+        st.caption("⬆️ Faça o upload do PDF dos cartões para ver o preview aqui.")
 
 area = {**AREA_RESPOSTA_PADRAO, "top_pct": top_pct}
 
 st.divider()
 
-# --- Processamento ---
+# ── 4. Gerar cartões ─────────────────────────
 st.subheader("4. Gerar cartões")
 
 if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
@@ -240,6 +277,7 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
 
     with st.spinner("Processando..."):
 
+        pdf_cartoes.seek(0)
         cartoes = pdf_para_imagens(pdf_cartoes.read(), DPI)
 
         respostas = []
