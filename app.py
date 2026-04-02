@@ -327,7 +327,13 @@ if aplicar_crop_flag:
     with col_preview:
         st.markdown("**Preview**")
         if arquivos_respostas:
-            img_preview = primeira_imagem(arquivos_respostas)
+            arq = sorted(arquivos_respostas, key=lambda f: f.name)[0]
+            arq.seek(0)
+            if arq.type == "application/pdf":
+                paginas = pdf_para_imagens(arq.read(), DPI)
+                img_preview = paginas[0] if paginas else None
+            else:
+                img_preview = Image.open(arq).convert("RGB")
             if img_preview:
                 st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base, cortar_esq, cortar_dir), use_container_width=True)
         else:
