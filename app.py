@@ -10,6 +10,7 @@ Dependências:
 
 import io
 import zipfile
+import itertools
 
 import streamlit as st
 from PIL import Image, ImageDraw
@@ -78,28 +79,35 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def extrair_cartoes(arquivos) -> list[Image.Image]:
-    """Extrai cartões de uma lista de arquivos (PDFs e/ou imagens), em ordem alfabética."""
-    cartoes = []
+def contar_paginas(arquivos) -> int:
+    """Conta quantas imagens/páginas existem no total, sem renderizar nada (rápido e leve)."""
+    total = 0
+    for arq in arquivos:
+        arq.seek(0)
+        if arq.type == "application/pdf":
+            doc = fitz.open(stream=arq.read(), filetype="pdf")
+            total += doc.page_count
+            doc.close()
+        else:
+            total += 1
+    return total
+
+
+def gerar_imagens(arquivos, dpi: int):
+    """Generator: produz uma imagem por vez (PDF renderizado página a página ou imagem avulsa),
+    em ordem alfabética dos arquivos. Evita carregar tudo na memória de uma vez."""
     for arq in sorted(arquivos, key=lambda f: f.name):
         arq.seek(0)
         if arq.type == "application/pdf":
-            cartoes.extend(pdf_para_imagens(arq.read(), DPI))
+            doc = fitz.open(stream=arq.read(), filetype="pdf")
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            for pagina in doc:
+                pix = pagina.get_pixmap(matrix=mat, alpha=False)
+                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                yield img
+            doc.close()
         else:
-            cartoes.append(Image.open(arq).convert("RGB"))
-    return cartoes
-
-
-
-    if not arquivos:
-        return None
-    arq = sorted(arquivos, key=lambda f: f.name)[0]
-    arq.seek(0)
-    if arq.type == "application/pdf":
-        paginas = pdf_para_imagens(arq.read(), DPI)
-        return paginas[0] if paginas else None
-    else:
-        return Image.open(arq).convert("RGB")
+            yield Image.open(arq).convert("RGB")
 
 
 def redimensionar_preview(img: Image.Image, max_h: int = 500) -> Image.Image:
@@ -254,8 +262,13 @@ with col_preview_cartao:
         arq = sorted(arquivos_cartoes, key=lambda f: f.name)[0]
         arq.seek(0)
         if arq.type == "application/pdf":
-            paginas_cartao = pdf_para_imagens(arq.read(), DPI)
-            img_cartao = paginas_cartao[0] if paginas_cartao else None
+            doc_preview = fitz.open(stream=arq.read(), filetype="pdf")
+            mat_preview = fitz.Matrix(DPI / 72, DPI / 72)
+            img_cartao = None
+            if doc_preview.page_count > 0:
+                pix = doc_preview[0].get_pixmap(matrix=mat_preview, alpha=False)
+                img_cartao = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            doc_preview.close()
         else:
             img_cartao = Image.open(arq).convert("RGB")
         if img_cartao:
@@ -330,8 +343,13 @@ if aplicar_crop_flag:
             arq = sorted(arquivos_respostas, key=lambda f: f.name)[0]
             arq.seek(0)
             if arq.type == "application/pdf":
-                paginas = pdf_para_imagens(arq.read(), DPI)
-                img_preview = paginas[0] if paginas else None
+                doc_preview_r = fitz.open(stream=arq.read(), filetype="pdf")
+                mat_preview_r = fitz.Matrix(DPI / 72, DPI / 72)
+                img_preview = None
+                if doc_preview_r.page_count > 0:
+                    pix = doc_preview_r[0].get_pixmap(matrix=mat_preview_r, alpha=False)
+                    img_preview = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                doc_preview_r.close()
             else:
                 img_preview = Image.open(arq).convert("RGB")
             if img_preview:
@@ -354,41 +372,51 @@ if st.button("🚀 Gerar cartões", use_container_width=True, type="primary"):
         st.error("⚠️ Envie as respostas na seção 3.")
         st.stop()
 
-    with st.spinner("Processando..."):
+    # Conta quantas páginas/imagens existem, sem renderizar (rápido e leve em memória)
+    total_cartoes = contar_paginas(arquivos_cartoes)
+    total_respostas = contar_paginas(arquivos_respostas)
 
-        cartoes = extrair_cartoes(arquivos_cartoes)
+    if total_respostas < total_cartoes:
+        st.warning(
+            f"⚠️ Há menos respostas ({total_respostas}) do que cartões ({total_cartoes}). "
+            "Os cartões sem par serão exportados sem sobreposição."
+        )
 
-        respostas = []
-        for arq in sorted(arquivos_respostas, key=lambda f: f.name):
-            arq.seek(0)
-            if arq.type == "application/pdf":
-                paginas = pdf_para_imagens(arq.read(), DPI)
-                respostas.extend(paginas)
+    progresso = st.progress(0, text="Processando cartão 0...")
+
+    cartoes_gen = gerar_imagens(arquivos_cartoes, DPI)
+    respostas_gen = gerar_imagens(arquivos_respostas, DPI)
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        i = 0
+        for cartao, resposta in itertools.zip_longest(cartoes_gen, respostas_gen):
+            if cartao is None:
+                # Sobraram respostas sem cartão correspondente — ignora o restante.
+                break
+
+            if resposta is not None:
+                if aplicar_crop_flag:
+                    resposta = aplicar_crop(resposta, cortar_topo, cortar_base, cortar_esq, cortar_dir)
+                cartao_final = sobrepor_resposta(cartao, resposta, area)
             else:
-                img = Image.open(arq).convert("RGB")
-                respostas.append(img)
+                cartao_final = cartao
 
-        if aplicar_crop_flag:
-            respostas = [aplicar_crop(r, cortar_topo, cortar_base, cortar_esq, cortar_dir) for r in respostas]
+            zf.writestr(f"cartao_{i+1:03d}.png", imagem_para_bytes(cartao_final))
 
-        if len(respostas) < len(cartoes):
-            st.warning(
-                f"⚠️ Há menos respostas ({len(respostas)}) do que cartões ({len(cartoes)}). "
-                "Os cartões sem par serão exportados sem sobreposição."
+            i += 1
+            progresso.progress(
+                min(i / total_cartoes, 1.0),
+                text=f"Processando cartão {i}/{total_cartoes}..."
             )
 
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, cartao in enumerate(cartoes):
-                if i < len(respostas):
-                    cartao_final = sobrepor_resposta(cartao, respostas[i], area)
-                else:
-                    cartao_final = cartao
-                zf.writestr(f"cartao_{i+1:03d}.png", imagem_para_bytes(cartao_final))
+            # Libera a memória do cartão/resposta atual antes de seguir pro próximo
+            del cartao, resposta, cartao_final
 
-        zip_buffer.seek(0)
+    progresso.empty()
+    zip_buffer.seek(0)
 
-    st.success(f"✅ {len(cartoes)} cartão(ões) gerado(s) com sucesso!")
+    st.success(f"✅ {total_cartoes} cartão(ões) gerado(s) com sucesso!")
 
     st.download_button(
         label="📥 Baixar cartões (ZIP)",
