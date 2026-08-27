@@ -79,6 +79,23 @@ def imagem_para_bytes(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
+@st.cache_data(show_spinner=False)
+def carregar_primeira_pagina(nome: str, tamanho: int, tipo: str, dpi: int, _obter_bytes) -> Image.Image | None:
+    """Extrai só a 1ª página/imagem de um arquivo, cacheado por (nome, tamanho, tipo, dpi).
+    Assim, mover um slider não faz reler/reabrir um PDF inteiro de novo — só na 1ª vez que o arquivo aparece."""
+    dados = _obter_bytes()
+    if tipo == "application/pdf":
+        doc = fitz.open(stream=dados, filetype="pdf")
+        img = None
+        if doc.page_count > 0:
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            pix = doc[0].get_pixmap(matrix=mat, alpha=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        doc.close()
+        return img
+    return Image.open(io.BytesIO(dados)).convert("RGB")
+
+
 def contar_paginas(arquivos) -> int:
     """Conta quantas imagens/páginas existem no total, sem renderizar nada (rápido e leve)."""
     total = 0
@@ -261,16 +278,7 @@ with col_preview_cartao:
     if arquivos_cartoes:
         arq = sorted(arquivos_cartoes, key=lambda f: f.name)[0]
         arq.seek(0)
-        if arq.type == "application/pdf":
-            doc_preview = fitz.open(stream=arq.read(), filetype="pdf")
-            mat_preview = fitz.Matrix(DPI / 72, DPI / 72)
-            img_cartao = None
-            if doc_preview.page_count > 0:
-                pix = doc_preview[0].get_pixmap(matrix=mat_preview, alpha=False)
-                img_cartao = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            doc_preview.close()
-        else:
-            img_cartao = Image.open(arq).convert("RGB")
+        img_cartao = carregar_primeira_pagina(arq.name, arq.size, arq.type, DPI, arq.read)
         if img_cartao:
             st.image(gerar_preview_cartao(img_cartao, top_pct, bottom_pct, left_pct, right_pct), use_container_width=True)
     else:
@@ -342,16 +350,7 @@ if aplicar_crop_flag:
         if arquivos_respostas:
             arq = sorted(arquivos_respostas, key=lambda f: f.name)[0]
             arq.seek(0)
-            if arq.type == "application/pdf":
-                doc_preview_r = fitz.open(stream=arq.read(), filetype="pdf")
-                mat_preview_r = fitz.Matrix(DPI / 72, DPI / 72)
-                img_preview = None
-                if doc_preview_r.page_count > 0:
-                    pix = doc_preview_r[0].get_pixmap(matrix=mat_preview_r, alpha=False)
-                    img_preview = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                doc_preview_r.close()
-            else:
-                img_preview = Image.open(arq).convert("RGB")
+            img_preview = carregar_primeira_pagina(arq.name, arq.size, arq.type, DPI, arq.read)
             if img_preview:
                 st.image(gerar_preview_crop(img_preview, cortar_topo, cortar_base, cortar_esq, cortar_dir), use_container_width=True)
         else:
